@@ -1,7 +1,7 @@
 package main
 
 import (
-	"fmt"
+	// "fmt"
 	"net/http"
 )
 
@@ -12,13 +12,12 @@ func (apiHandler) ServeHTTP(http.ResponseWriter, *http.Request) {}
 func main() {
 	mux := http.NewServeMux()
 	mux.Handle("/api/", apiHandler{})
-	mux.HandleFunc("/", func(w http.ResponseWriter, req *http.Request) {
-		// The "/" pattern matches everything, so we need to check
-		// that we're at the root here.
-		if req.URL.Path != "/" {
-			http.NotFound(w, req)
-			return
-		}
-		fmt.Fprintf(w, "Welcome to the home page!")
-	})
+	mux.Handle("/", http.FileServer(http.Dir(".")))
+
+	server := &http.Server{
+		Addr:    ":8080",
+		Handler: mux,
+	}
+
+	server.ListenAndServe()
 }
