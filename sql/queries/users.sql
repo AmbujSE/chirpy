@@ -6,4 +6,4 @@ VALUES (
     NOW(),
     $1
 )
-RETURNING *;    
+RETURNING *;
