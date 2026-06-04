@@ -2,7 +2,6 @@ package main
 
 import (
 	"database/sql"
-	"fmt"
 	"log"
 	"net/http"
 	"os"
@@ -16,39 +15,19 @@ import (
 type apiConfig struct {
 	fileserverHits atomic.Int32
 	db             *database.Queries
-}
-
-func (cfg *apiConfig) middlewareMetricsInc(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// 1. Safely increment the atomic counter whenever a request comes in
-		cfg.fileserverHits.Add(1)
-
-		// 2. Log the request tracking
-		log.Printf("%s %s", r.Method, r.URL.Path)
-
-		// 3. Pass the request to the next handler in line
-		next.ServeHTTP(w, r)
-	})
-}
-
-func (cfg *apiConfig) handlerMetrics(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	w.WriteHeader(http.StatusOK)
-
-	// Safely read the atomic counter value using Load()
-	hits := cfg.fileserverHits.Load()
-	w.Write([]byte(fmt.Sprintf(`<html>
-  <body>
-    <h1>Welcome, Chirpy Admin</h1>
-    <p>Chirpy has been visited %d times!</p>
-  </body>
-</html>`, hits)))
+	platform       string
 }
 
 func main() {
 	godotenv.Load()
-
 	dbURL := os.Getenv("DB_URL")
+	if dbURL == "" {
+		log.Fatal("DB_URL must be set")
+	}
+	platform := os.Getenv("PLATFORM")
+	if platform == "" {
+		log.Fatal("PLATFORM must be set")
+	}
 
 	db, err := sql.Open("postgres", dbURL)
 	if err != nil {
@@ -62,16 +41,15 @@ func main() {
 
 	mux := http.NewServeMux()
 	apiCfg := apiConfig{
-		db: dbQueries,
+		db:       dbQueries,
+		platform: platform,
 	}
 
-	mux.HandleFunc("GET /api/healthz", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("OK"))
-	})
+	mux.HandleFunc("GET /api/healthz", apiCfg.handlerHealthz)
 
 	mux.HandleFunc("POST /api/validate_chirp", apiCfg.handlerValidateChirp)
+
+	mux.HandleFunc("POST /api/users", apiCfg.handleUsers)
 
 	// File server on /app/ path
 	fileServerHandler := http.StripPrefix("/app/", http.FileServer(http.Dir(filepathRoot)))
@@ -79,8 +57,8 @@ func main() {
 	mux.HandleFunc("GET /admin/metrics", apiCfg.handlerMetrics)
 	mux.HandleFunc("POST /admin/reset", apiCfg.handlerReset)
 
-	// Assets handler
-	mux.Handle("/assets/", http.StripPrefix("/assets/", http.FileServer(http.Dir("assests"))))
+	// Assets handler - FIXED typo: changed "assests" to "assets"
+	mux.Handle("/assets/", http.StripPrefix("/assets/", http.FileServer(http.Dir("assets"))))
 
 	srv := &http.Server{
 		Addr:    ":" + port,

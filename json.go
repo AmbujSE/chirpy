@@ -12,24 +12,29 @@ import (
 func cleanProfanity(text string) string {
 	profaneWords := []string{"kerfuffle", "sharbert", "fornax"}
 	words := strings.Split(text, " ")
-	
+
 	for i, word := range words {
-		lowerWord := strings.ToLower(word)
+		// FIXED: Account for punctuation attached to words (e.g. "kerfuffle!")
+		cleanedWord := strings.Trim(word, ".,!?;:\"'")
+		lowerWord := strings.ToLower(cleanedWord)
+
 		for _, profane := range profaneWords {
 			if lowerWord == profane {
-				words[i] = "****"
+				// Retain punctuation surrounding the word if necessary, or substitute simply
+				// For structural simplicity matching original implementation intent:
+				words[i] = strings.Replace(strings.ToLower(word), profane, "****", 1)
 				break
 			}
 		}
 	}
-	
+
 	return strings.Join(words, " ")
 }
 
 func (cfg *apiConfig) respondWithError(w http.ResponseWriter, code int, msg string) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(code)
-	
+
 	respBody := map[string]string{"error": msg}
 	dat, err := json.Marshal(respBody)
 	if err != nil {
@@ -42,7 +47,7 @@ func (cfg *apiConfig) respondWithError(w http.ResponseWriter, code int, msg stri
 func (cfg *apiConfig) respondWithJSON(w http.ResponseWriter, code int, payload interface{}) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(code)
-	
+
 	dat, err := json.Marshal(payload)
 	if err != nil {
 		log.Printf("Error marshalling JSON: %s", err)
@@ -55,23 +60,24 @@ func (cfg *apiConfig) handlerValidateChirp(w http.ResponseWriter, r *http.Reques
 	type parameters struct {
 		Body string `json:"body"`
 	}
-	
+
 	decoder := json.NewDecoder(r.Body)
 	params := parameters{}
 	err := decoder.Decode(&params)
 	if err != nil {
-		cfg.respondWithError(w, http.StatusInternalServerError, "Something went wrong")
+		// FIXED: Changed from StatusInternalServerError to StatusBadRequest
+		cfg.respondWithError(w, http.StatusBadRequest, "Invalid JSON payload")
 		return
 	}
-	
+
 	const maxChirpLength = 140
 	if len(params.Body) > maxChirpLength {
 		cfg.respondWithError(w, http.StatusBadRequest, "Chirp is too long")
 		return
 	}
-	
+
 	cleanedBody := cleanProfanity(params.Body)
-	
+
 	type returnVals struct {
 		CleanedBody string `json:"cleaned_body"`
 	}
