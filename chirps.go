@@ -4,14 +4,17 @@ import (
 	"encoding/json"
 	"net/http"
 	"strings"
+	"time"
+	"unicode"
+
+	"github.com/chirpy/internal/database"
+	"github.com/google/uuid"
 )
 
-func handlerChirpsValidate(w http.ResponseWriter, r *http.Request) {
+func (cfg *apiConfig) handlerChirpsCreate(w http.ResponseWriter, r *http.Request) {
 	type parameters struct {
-		Body string `json:"body"`
-	}
-	type returnVals struct {
-		CleanedBody string `json:"cleaned_body"`
+		Body   string `json:"body"`
+		UserID string `json:"user_id"`
 	}
 
 	decoder := json.NewDecoder(r.Body)
@@ -22,9 +25,20 @@ func handlerChirpsValidate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if params.Body == "" {
+		respondWithError(w, http.StatusBadRequest, "Chirp must not be empty", nil)
+		return
+	}
+
 	const maxChirpLength = 140
 	if len(params.Body) > maxChirpLength {
 		respondWithError(w, http.StatusBadRequest, "Chirp is too long", nil)
+		return
+	}
+
+	userID, err := uuid.Parse(params.UserID)
+	if err != nil {
+		respondWithError(w, http.StatusBadRequest, "Invalid user_id", err)
 		return
 	}
 
@@ -33,21 +47,42 @@ func handlerChirpsValidate(w http.ResponseWriter, r *http.Request) {
 		"sharbert":  {},
 		"fornax":    {},
 	}
-	cleaned := getCleanedBody(params.Body, badWords)
 
-	respondWithJSON(w, http.StatusOK, returnVals{
-		CleanedBody: cleaned,
+	cleanedBody := getCleanedBody(params.Body, badWords)
+
+	chirp, err := cfg.db.CreateChirp(r.Context(), database.CreateChirpParams{
+		Body:   cleanedBody,
+		UserID: userID,
+	})
+	if err != nil {
+		respondWithError(w, http.StatusInternalServerError, "Couldn't create chirp", err)
+		return
+	}
+
+	respondWithJSON(w, http.StatusCreated, struct {
+		ID        uuid.UUID `json:"id"`
+		CreatedAt time.Time `json:"created_at"`
+		UpdatedAt time.Time `json:"updated_at"`
+		Body      string    `json:"body"`
+		UserID    uuid.UUID `json:"user_id"`
+	}{
+		ID:        chirp.ID,
+		CreatedAt: chirp.CreatedAt,
+		UpdatedAt: chirp.UpdatedAt,
+		Body:      chirp.Body,
+		UserID:    chirp.UserID,
 	})
 }
 
 func getCleanedBody(body string, badWords map[string]struct{}) string {
-	words := strings.Split(body, " ")
+	words := strings.Fields(body)
 	for i, word := range words {
-		loweredWord := strings.ToLower(word)
-		if _, ok := badWords[loweredWord]; ok {
-			words[i] = "****"
+		cleanWord := strings.ToLower(strings.TrimFunc(word, func(r rune) bool {
+			return !unicode.IsLetter(r) && !unicode.IsDigit(r)
+		}))
+		if _, ok := badWords[cleanWord]; ok {
+			words[i] = strings.Repeat("*", len(word))
 		}
 	}
-	cleaned := strings.Join(words, " ")
-	return cleaned
+	return strings.Join(words, " ")
 }
