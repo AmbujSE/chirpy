@@ -6,10 +6,23 @@ import (
 	"errors"
 	"net/http"
 
+	"github.com/chirpy/internal/auth" // Make sure to import your auth package!
 	"github.com/google/uuid"
 )
 
 func (cfg *apiConfig) handlerWebhook(w http.ResponseWriter, r *http.Request) {
+	// 1. Authenticate the request first!
+	apiKey, err := auth.GetAPIKey(r.Header)
+	if err != nil {
+		respondWithError(w, http.StatusUnauthorized, "Couldn't find API key", err)
+		return
+	}
+	if apiKey != cfg.polkaKey {
+		respondWithError(w, http.StatusUnauthorized, "Invalid API key", nil)
+		return
+	}
+
+	// 2. Decode the body as usual
 	type parameters struct {
 		Event string `json:"event"`
 		Data  struct {
@@ -19,19 +32,19 @@ func (cfg *apiConfig) handlerWebhook(w http.ResponseWriter, r *http.Request) {
 
 	decoder := json.NewDecoder(r.Body)
 	params := parameters{}
-	err := decoder.Decode(&params)
+	err = decoder.Decode(&params)
 	if err != nil {
 		respondWithError(w, http.StatusBadRequest, "Couldn't decode parameters", err)
 		return
 	}
 
-	// If the event isn't an upgrade, immediately return 204 No Content
+	// 3. Process the event
 	if params.Event != "user.upgraded" {
 		w.WriteHeader(http.StatusNoContent)
 		return
 	}
 
-	// Upgrade the user to Chirpy Red
+	// 4. Upgrade the user
 	_, err = cfg.db.UpgradeUserToRed(r.Context(), params.Data.UserID)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
@@ -42,6 +55,6 @@ func (cfg *apiConfig) handlerWebhook(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Respond with 204 on success
+	// 5. Success
 	w.WriteHeader(http.StatusNoContent)
 }

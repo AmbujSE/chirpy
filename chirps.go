@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"net/http"
+	"sort"
 	"strings"
 	"time"
 	"unicode"
@@ -97,12 +98,31 @@ func getCleanedBody(body string, badWords map[string]struct{}) string {
 }
 
 func (cfg *apiConfig) handlerChirpsList(w http.ResponseWriter, r *http.Request) {
-	dbChirps, err := cfg.db.GetChirps(r.Context())
+	// 1. Get query parameters
+	authorIDString := r.URL.Query().Get("author_id")
+	sortDirection := r.URL.Query().Get("sort") // Get the new sort parameter
+
+	var dbChirps []database.Chirp
+	var err error
+
+	// 2. Fetch from DB
+	if authorIDString != "" {
+		authorID, errParse := uuid.Parse(authorIDString)
+		if errParse != nil {
+			respondWithError(w, http.StatusBadRequest, "Invalid author ID", errParse)
+			return
+		}
+		dbChirps, err = cfg.db.GetChirpsByAuthor(r.Context(), authorID)
+	} else {
+		dbChirps, err = cfg.db.GetChirps(r.Context())
+	}
+
 	if err != nil {
 		respondWithError(w, http.StatusInternalServerError, "Couldn't retrieve chirps", err)
 		return
 	}
 
+	// 3. Map the results to the response struct
 	chirps := []Chirp{}
 	for _, dbChirp := range dbChirps {
 		chirps = append(chirps, Chirp{
@@ -113,6 +133,16 @@ func (cfg *apiConfig) handlerChirpsList(w http.ResponseWriter, r *http.Request) 
 			UserID:    dbChirp.UserID,
 		})
 	}
+
+	// 4. Sort the chirps in-memory
+	sort.Slice(chirps, func(i, j int) bool {
+		if sortDirection == "desc" {
+			// Descending: newest first
+			return chirps[i].CreatedAt.After(chirps[j].CreatedAt)
+		}
+		// Ascending: oldest first (default behavior)
+		return chirps[i].CreatedAt.Before(chirps[j].CreatedAt)
+	})
 
 	respondWithJSON(w, http.StatusOK, chirps)
 }
